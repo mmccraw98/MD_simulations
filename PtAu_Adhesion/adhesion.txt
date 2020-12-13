@@ -1,0 +1,83 @@
+# Info:
+# Depiction of JKR adhesion force between a gold (Au) substrate and a 1nm rigid-platinum (Pt) tip
+
+#------------------------------INITIALIZATION-------------------------------
+# General: 
+# Defines the general simulation parameters, dimensions and units
+units metal # defining the units as metal: energy (eV), distance (A), time (ps), temp (K)
+dimension 3 # defining that the simulation will exist in three dimensions
+boundary p p f # defining the simulation boundary conditions: x,y are periodic and z is fixed
+neighbor 2.0 bin # defining the neighbor list and the limit for the cutoff radius in A
+neigh_modify delay 5 every 1 check yes # setting the neighbor update to wait every five
+atom_style atomic # defining the atom style as atomic, which is standard for most LAMMPS simulations
+
+#####read_restart AFM.restart.<num> # uncomment to specify to resume simulation progress from a restart 
+				    # file of the prefix <num>. if so, uncomment all the lines in simulation 
+				    # setup except for the last 4: mass and pair style commands
+
+#------------------------------SIMULATION SETUP------------------------------
+# General:
+# Creates the geometries of the substrate and the tip, creates the atoms, and specify the dynamics of the atoms
+lattice fcc 4.08 orient x 1 -1 0 orient y 1 1 -2 orient z 1 1 1 # defining the global fcc lattice structure with the [1 1 1] surface is orthogonal w/ +z
+region box block 0.0 9.0 -0.01 9.74 -0.6 50.0 # creating the entire simulation block region
+create_box 2 box # creating the simulation box
+
+lattice fcc 4.08 orient x 1 -1 0 orient y 1 1 -2 orient z 1 1 1 # defining the fcc lattice structure in the same orientation as before, w/ the Au lattice param
+region au_substrate block INF INF -0.0001 9.6251 -0.6 2.8 # creating the region which spans the volume of the Au substrate
+create_atoms 1 region au_substrate # filling the atoms with the type 1 atom, Au
+region bottom_box block INF INF INF INF INF 2.0 units box # defining a region containing the bottom two layers of Au atoms
+group au type 1 # defining a group containing the type 1 atom, Au
+group fixed_au region bottom_box # defining a group containing the atoms from the previously mentioned, bottom two Au layers
+group dynamical_au subtract au fixed_au # defining another group containing the Au atoms in the top few layers
+
+lattice fcc 3.92 orient x 1 -1 0 orient y 1 1 -2 orient z 1 1 1 # defining the fcc lattice structure in the same orientation as before, w/ the Pt lattice param
+region sphere sphere 26.0 32.0 40.0 10.0 units box side in # defining the region of the Pt spherical tip
+create_atoms 2 region  sphere # creating the Pt atoms
+region top_box block INF INF INF INF 40.0 INF units box # defining a boxed region containing the top-half of the box
+group pt type 2 # defining the group containing the type 2 atom, Pt
+group top-pt region top_box # defining the group containing the top box with the upper hemi-sphere
+delete_atoms group top-pt # deleting the atoms in the upper hemi-sphere
+
+mass 1 196.967 # defining the mass of the type 1 atoms Au
+mass 2 195.078 # defining the mass of the type 2 atoms Pt
+pair_style eam/alloy # defining the pair style, eam/alloy for the interactions between two different atoms and themselves
+pair_coeff * * ptau.eam.alloy Au Pt # loading the pair potential for Au and Pt
+
+#------------------------------RUNTIME------------------------------------
+# General:
+Runs the simulation, computes physical observables, and controls the motion of the tips
+compute new1 dynamical_au temp # defines a new compute command to calculate the temperature of the mobile group
+timestep 0.001 # defining the timestep of the simulation as 0.001 ps
+dump 1 all xyz 5000 adhesion.xyz # defining the dump to save the xyz coords of all atoms under the filename adhesion.xyz
+dump_modify 1 element Au Pt first yes # Modifying the order for which the atoms are dumped: Au first, Pt second
+
+velocity dynamical_au create 298.0 482748 temp new1 # sets the velocity of the dynamic Au atoms randomly so that the initial frame, even though a perfect
+						    # crystal, is physically valid
+velocity fixed_au set 0.0 0.0 0.0 units box # setting the velocity of the fixed group of Au atoms to 0 in all dimensions so that they are fixed
+variable tipfx equal fcm(pt,x)*1.602 # calculating the x force of the Pt tip (nN)
+variable tipfy equal fcm(pt,y)*1.602 # calculating the y force of the Pt tip (nN)
+variable tipfz equal fcm(pt,z)*1.602 # calculating the z force of the Pt tip (nN)
+variable tipvx equal vcm(pt,x)*100 # calculating the x velocity of the Pt tip (A/ps)
+variable tipvy equal vcm(pt,y)*100 # calculating the y velocity of the Pt tip (A/ps)
+variable tipvz equal vcm(pt,z)*100 # calculating the z velocity of the Pt tip (A/ps)
+variable tipxx equal xcm(pt,x) # calculating the x position of the Pt tip (A)
+variable tipxy equal xcm(pt,y) # calculating the y position of the Pt tip (A)
+variable tipxz equal xcm(pt,z) # calculating the z position of the Pt tip (A)
+
+fix 1  dynamical_au nvt temp 298.0 298.0 0.1 # maintaining the temp of the nvt ensemble at 298K
+fix 2  fixed_au setforce 0.0 0.0 0.0 # maintaining 0 force on the bottom fixed Au atoms
+fix 3  pt rigid/nve single torque 1 off off off # setting the interactions of all the Pt atoms as rigid
+fix 4  pt move linear 0.0 0.0 -0.01  units box # moving the Pt atoms down in the z dimension with 0.01 A / time step
+
+thermo_style custom step temp pe etotal v_tipxx v_tipxy v_tipxz v_tipfx v_tipfy v_tipfz # dumping the total energy & temperature, tip force, velocity, 
+											# and position to the log file
+thermo 1000 # defining how often to log thermal data to the log
+thermo_modify temp new1 # 
+
+restart 50000 AFM.restart # defining how often to dump progress to the restart file
+run 1084030 upto # setting the simulation to run for enough timesteps for the tip of the indenter to touch the surface of the sample
+fix 5 pt move linear 0.0 0.0 0.0 units box # redefining the velocity of the tip to stop its motion
+run 1150000 upto # running only for a short time to allow the surface topography to equilibrate to the tip contact
+fix 6 pt move linear 0.0 0.0 0.01 units box # redefining the tip velocity so that it moves upwards 0.01 A / time step
+run 2234030 upto # running for enough time such that the tip reaches its initial position
+quit # quitting the program once the process is done
